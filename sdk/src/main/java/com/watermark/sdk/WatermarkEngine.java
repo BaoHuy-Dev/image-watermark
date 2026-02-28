@@ -1,5 +1,9 @@
 package com.watermark.sdk;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
@@ -101,19 +105,46 @@ public class WatermarkEngine {
 
     /**
      * Auto-detect file type and extract the appropriate watermark.
+     * Supports ALL image formats (PNG, JPG, BMP, WEBP, GIF, TIFF, etc.)
+     *
+     * For images: tries Robust QIM extraction first (for screenshots),
+     * then falls back to LSB extraction (for original watermarked images).
      */
     public WatermarkResult extractAuto(byte[] fileBytes, String fileName) throws IOException {
         String text = null;
-        if (fileName != null && fileName.toLowerCase().endsWith(".pdf")) {
+        String lowerName = fileName != null ? fileName.toLowerCase() : "";
+
+        if (lowerName.endsWith(".pdf")) {
+            // PDF: metadata + robust QIM from rendered pages
             text = PdfWatermark.extract(fileBytes);
         } else {
-            text = LsbSteganography.extract(fileBytes);
+            // Any image format: read with ImageIO
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(fileBytes));
+            if (img != null) {
+                // Try 1: Robust QIM extraction (works for screenshots)
+                try {
+                    text = RobustWatermark.extractFromImage(img);
+                } catch (Exception e) {
+                    // ignore
+                }
+
+                // Try 2: LSB extraction (works for original watermarked PNG/BMP)
+                if (text == null) {
+                    try {
+                        ByteArrayOutputStream pngOut = new ByteArrayOutputStream();
+                        ImageIO.write(img, "png", pngOut);
+                        text = LsbSteganography.extract(pngOut.toByteArray());
+                    } catch (Exception e) {
+                        // ignore
+                    }
+                }
+            }
         }
         return text != null ? WatermarkResult.found(text) : WatermarkResult.notFound();
     }
 
     /**
-     * Embed watermark into a PDF (semi-transparent text overlay).
+     * Embed watermark into a PDF (screenshot-proof invisible steganography).
      */
     public byte[] embedPdf(byte[] pdfBytes, String userId, String email) throws IOException {
         return PdfWatermark.embed(pdfBytes, userId, email);

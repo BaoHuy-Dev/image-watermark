@@ -25,11 +25,16 @@ function VerifyPage() {
             const data = await extractWatermark(file);
             if (data.found && data.watermark) {
                 try {
-                    // Try parsing JSON if it's user info
                     const json = JSON.parse(data.watermark);
-                    setResult({ found: true, payload: json, raw: data.watermark });
+                    setResult({
+                        found: true,
+                        payload: json,
+                        raw: data.watermark,
+                        method: data.method || 'direct',
+                        confidence: data.confidence
+                    });
                 } catch (e) {
-                    setResult({ found: true, raw: data.watermark });
+                    setResult({ found: true, raw: data.watermark, method: data.method || 'direct' });
                 }
             } else {
                 setResult({ found: false });
@@ -54,7 +59,7 @@ function VerifyPage() {
             <div className="mb-10">
                 <h1 className="text-4xl font-extrabold tracking-tight text-primary">Verify Watermark</h1>
                 <p className="text-primary/60 mt-2">
-                    Upload an image asset to decode and verify its invisible LSB watermark signature.
+                    Upload any file (screenshot, image, or PDF) to scan for hidden watermark signature.
                 </p>
             </div>
 
@@ -67,7 +72,7 @@ function VerifyPage() {
                             Asset Inspector
                         </h3>
 
-                        <input type="file" ref={fileRef} onChange={handleFileChange} className="hidden" accept="image/png, image/bmp, application/pdf" />
+                        <input type="file" ref={fileRef} onChange={handleFileChange} className="hidden" accept="image/*,application/pdf" />
 
                         <div
                             onClick={() => fileRef.current?.click()}
@@ -86,8 +91,8 @@ function VerifyPage() {
                                     <span className="material-symbols-outlined text-3xl">plagiarism</span>
                                 </div>
                             )}
-                            <p className="font-bold text-primary">{file ? file.name : 'Click to select asset file'}</p>
-                            <p className="text-xs text-primary/40 mt-1">PNG, BMP, or PDF</p>
+                            <p className="font-bold text-primary">{file ? file.name : 'Click to select any file'}</p>
+                            <p className="text-xs text-primary/40 mt-1">Any image format (PNG, JPG, BMP, WEBP…) or PDF</p>
                         </div>
 
                         <button
@@ -122,8 +127,18 @@ function VerifyPage() {
 
                                 {result.found && (
                                     <div className="space-y-4">
+                                        {result.method === 'fingerprint' && result.confidence && (
+                                            <div className="bg-green-100 p-3 rounded-lg border border-green-300 flex items-center gap-2">
+                                                <span className="material-symbols-outlined text-green-600">fingerprint</span>
+                                                <p className="text-sm font-bold text-green-800">
+                                                    Screenshot Match — {result.confidence}% confidence
+                                                </p>
+                                            </div>
+                                        )}
                                         <div className="bg-white p-4 rounded-lg border border-green-500/20 shadow-sm">
-                                            <p className="text-xs text-green-600/70 font-bold uppercase tracking-widest mb-2">Hidden Payload</p>
+                                            <p className="text-xs text-green-600/70 font-bold uppercase tracking-widest mb-2">
+                                                {result.method === 'fingerprint' ? 'Matched Owner' : 'Hidden Payload'}
+                                            </p>
 
                                             {result.payload ? (
                                                 <div className="grid grid-cols-1 gap-2">
@@ -135,17 +150,31 @@ function VerifyPage() {
                                                         <span className="text-sm font-medium text-green-700">User ID</span>
                                                         <span className="text-sm font-mono text-green-900 truncate max-w-[150px]">{result.payload.userId}</span>
                                                     </div>
-                                                    <div className="flex justify-between">
-                                                        <span className="text-sm font-medium text-green-700">Timestamp</span>
-                                                        <span className="text-sm font-bold text-green-900">{new Date(result.payload.ts).toLocaleString()}</span>
-                                                    </div>
+                                                    {result.payload.product && (
+                                                        <div className="flex justify-between border-b border-green-100 pb-2">
+                                                            <span className="text-sm font-medium text-green-700">Product</span>
+                                                            <span className="text-sm font-bold text-green-900">{result.payload.product}</span>
+                                                        </div>
+                                                    )}
+                                                    {result.payload.ts && (
+                                                        <div className="flex justify-between">
+                                                            <span className="text-sm font-medium text-green-700">Timestamp</span>
+                                                            <span className="text-sm font-bold text-green-900">{new Date(result.payload.ts).toLocaleString()}</span>
+                                                        </div>
+                                                    )}
+                                                    {result.payload.matchConfidence && (
+                                                        <div className="flex justify-between">
+                                                            <span className="text-sm font-medium text-green-700">Match Confidence</span>
+                                                            <span className="text-sm font-bold text-green-900">{result.payload.matchConfidence}</span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ) : (
                                                 <p className="font-mono text-sm text-green-800 break-all">{result.raw}</p>
                                             )}
                                         </div>
                                         <p className="text-xs text-green-700 text-center">
-                                            This image contains an embedded Aura Digital license.
+                                            Detected via {result.method === 'fingerprint' ? 'Perceptual Hash Fingerprint Matching' : 'Direct Watermark Extraction'}.
                                         </p>
                                     </div>
                                 )}

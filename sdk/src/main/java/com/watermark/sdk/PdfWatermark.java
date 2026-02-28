@@ -5,10 +5,12 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
-import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
-import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.rendering.PDFRenderer;
 
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,81 +18,85 @@ import java.time.Instant;
 import java.util.Base64;
 
 /**
- * Invisible PDF watermark using dual-layer steganography:
- * 
- * Layer 1: PDF Document Metadata (custom properties) - primary, reliable
- * Layer 2: Fully transparent text on every page (0% opacity) - backup forensic
- * layer
- * 
- * Both layers are completely INVISIBLE to the human eye.
- * Only the admin extraction tool can read them.
+ * Screenshot-proof invisible PDF watermark using:
+ *
+ * Layer 1: PDF Document Metadata — for direct PDF file scanning
+ * Layer 2: QIM Robust Watermark on every page — survives screenshots
+ *
+ * Each page is rasterized, watermarked with the robust QIM algorithm
+ * (block-average quantization), then repackaged into the PDF.
+ *
+ * If someone screenshots ANY page and saves it in ANY format (PNG, JPG...),
+ * the watermark can be extracted from that screenshot.
  */
 public final class PdfWatermark {
 
     private static final String META_KEY = "X-Aura-Sig";
     private static final String META_PAGES_KEY = "X-Aura-PgSig";
     private static final String SIGNATURE_PREFIX = "AURA::";
+    private static final float RENDER_DPI = 150f;
 
     private PdfWatermark() {
     }
 
     /**
-     * Embed an invisible watermark into every page of a PDF.
-     * Uses two steganographic layers:
-     * 1. Custom PDF metadata property (invisible, reliable extraction)
-     * 2. Fully transparent text on each page (invisible, forensic backup)
+     * Embed a screenshot-proof invisible watermark into every page of a PDF.
      */
     public static byte[] embed(byte[] pdfBytes, String userId, String email) throws IOException {
         String timestamp = Instant.now().toString();
-        String payload = String.format(
+        String jsonPayload = String.format(
                 "{\"userId\":\"%s\",\"email\":\"%s\",\"ts\":\"%s\"}",
                 escape(userId), escape(email), timestamp);
 
-        // Encode payload as Base64 for safe storage in metadata
         String encoded = Base64.getEncoder().encodeToString(
-                payload.getBytes(StandardCharsets.UTF_8));
+                jsonPayload.getBytes(StandardCharsets.UTF_8));
+        String signature = SIGNATURE_PREFIX + encoded;
 
-        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+        try (PDDocument srcDoc = Loader.loadPDF(pdfBytes)) {
+            PDFRenderer renderer = new PDFRenderer(srcDoc);
+            int pageCount = srcDoc.getNumberOfPages();
 
-            // === Layer 1: Document metadata (primary) ===
-            PDDocumentInformation info = doc.getDocumentInformation();
-            info.setCustomMetadataValue(META_KEY, SIGNATURE_PREFIX + encoded);
-            info.setCustomMetadataValue(META_PAGES_KEY,
-                    String.valueOf(doc.getNumberOfPages()));
+            try (PDDocument destDoc = new PDDocument()) {
 
-            // === Layer 2: Invisible text on every page (forensic backup) ===
-            // Alpha 0.0 = completely transparent = invisible to human eye
-            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+                for (int i = 0; i < pageCount; i++) {
+                    PDRectangle originalSize = srcDoc.getPage(i).getMediaBox();
 
-            PDExtendedGraphicsState gs = new PDExtendedGraphicsState();
-            gs.setNonStrokingAlphaConstant(0.0f); // FULLY transparent
-            gs.setStrokingAlphaConstant(0.0f); // FULLY transparent
+                    // Render page to image
+                    BufferedImage pageImage = renderer.renderImageWithDPI(i, RENDER_DPI);
 
-            String invisibleText = SIGNATURE_PREFIX + encoded;
+                    // === ROBUST WATERMARK: embed using QIM block algorithm ===
+                    // This survives screenshots, scaling, and JPEG compression
+                    BufferedImage watermarkedImage = RobustWatermark.embedIntoImage(pageImage, jsonPayload);
 
-            for (PDPage page : doc.getPages()) {
-                try (PDPageContentStream cs = new PDPageContentStream(
-                        doc, page, PDPageContentStream.AppendMode.APPEND, true, true)) {
-                    cs.setGraphicsStateParameters(gs);
-                    cs.setNonStrokingColor(1.0f, 1.0f, 1.0f); // White (invisible on any bg)
+                    // Create new page with watermarked image
+                    PDPage newPage = new PDPage(originalSize);
+                    destDoc.addPage(newPage);
 
-                    cs.beginText();
-                    cs.setFont(font, 1f); // Tiny font size
-                    cs.newLineAtOffset(0, 0); // Bottom-left corner
-                    cs.showText(invisibleText);
-                    cs.endText();
+                    PDImageXObject pdImage = LosslessFactory.createFromImage(destDoc, watermarkedImage);
+                    try (PDPageContentStream cs = new PDPageContentStream(destDoc, newPage)) {
+                        cs.drawImage(pdImage, 0, 0,
+                                originalSize.getWidth(), originalSize.getHeight());
+                    }
                 }
-            }
 
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            doc.save(out);
-            return out.toByteArray();
+                // === Layer 1: Document metadata (for direct PDF scanning) ===
+                PDDocumentInformation info = destDoc.getDocumentInformation();
+                info.setCustomMetadataValue(META_KEY, signature);
+                info.setCustomMetadataValue(META_PAGES_KEY, String.valueOf(pageCount));
+
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                destDoc.save(out);
+                return out.toByteArray();
+            }
         }
     }
 
     /**
      * Extract the invisible watermark from a PDF.
-     * Tries Layer 1 (metadata) first, falls back to Layer 2 (invisible text).
+     *
+     * Strategy:
+     * 1. Try metadata (fastest)
+     * 2. Try robust QIM extraction from rendered pages (works for modified PDFs)
      */
     public static String extract(byte[] pdfBytes) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
@@ -100,32 +106,26 @@ public final class PdfWatermark {
             String metaValue = info.getCustomMetadataValue(META_KEY);
 
             if (metaValue != null && metaValue.startsWith(SIGNATURE_PREFIX)) {
-                String encoded = metaValue.substring(SIGNATURE_PREFIX.length());
+                String enc = metaValue.substring(SIGNATURE_PREFIX.length());
                 try {
-                    byte[] decoded = Base64.getDecoder().decode(encoded);
+                    byte[] decoded = Base64.getDecoder().decode(enc);
                     return new String(decoded, StandardCharsets.UTF_8);
                 } catch (Exception e) {
-                    // Corrupted metadata, try Layer 2
+                    // Corrupted, fall through
                 }
             }
 
-            // === Try Layer 2: Invisible text extraction ===
-            org.apache.pdfbox.text.PDFTextStripper stripper = new org.apache.pdfbox.text.PDFTextStripper();
-            String allText = stripper.getText(doc);
-
-            if (allText != null) {
-                int idx = allText.indexOf(SIGNATURE_PREFIX);
-                if (idx >= 0) {
-                    // Extract the Base64 payload after the prefix
-                    String remaining = allText.substring(idx + SIGNATURE_PREFIX.length()).trim();
-                    // Take until whitespace or end of string
-                    String encoded = remaining.split("\\s+")[0].trim();
-                    try {
-                        byte[] decoded = Base64.getDecoder().decode(encoded);
-                        return new String(decoded, StandardCharsets.UTF_8);
-                    } catch (Exception e) {
-                        // Corrupted text layer
+            // === Try Layer 2: Robust QIM extraction from rendered pages ===
+            PDFRenderer renderer = new PDFRenderer(doc);
+            for (int i = 0; i < Math.min(doc.getNumberOfPages(), 3); i++) {
+                try {
+                    BufferedImage pageImage = renderer.renderImageWithDPI(i, RENDER_DPI);
+                    String extracted = RobustWatermark.extractFromImage(pageImage);
+                    if (extracted != null && extracted.contains("userId")) {
+                        return extracted;
                     }
+                } catch (Exception e) {
+                    // Try next page
                 }
             }
 
