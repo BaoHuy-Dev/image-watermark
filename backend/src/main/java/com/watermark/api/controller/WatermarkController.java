@@ -1,6 +1,6 @@
 package com.watermark.api.controller;
 
-import com.watermark.api.service.WatermarkService;
+import com.watermark.sdk.WatermarkEngine;
 import com.watermark.sdk.WatermarkResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,7 +8,6 @@ import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.util.Map;
 
 @Slf4j
@@ -17,62 +16,39 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class WatermarkController {
 
-    private final WatermarkService service;
+    private final WatermarkEngine engine;
 
-    /**
-     * POST /api/watermark/embed
-     * Nhúng watermark ẩn chứa thông tin user vào ảnh.
-     */
     @PostMapping("/embed")
-    public ResponseEntity<byte[]> embed(
-            @RequestParam("file") MultipartFile file,
+    public ResponseEntity<byte[]> embed(@RequestParam("file") MultipartFile file,
             @RequestParam("userId") String userId,
-            @RequestParam("userEmail") String userEmail) {
+            @RequestParam(value = "userEmail", defaultValue = "") String email) {
         try {
-            byte[] result = service.embedUserWatermark(file.getBytes(), userId, userEmail);
+            byte[] result = engine.embedUserInfo(file.getBytes(), userId, email);
             return ResponseEntity.ok()
                     .contentType(MediaType.IMAGE_PNG)
-                    .header(HttpHeaders.CONTENT_DISPOSITION,
-                            "attachment; filename=\"watermarked.png\"")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"watermarked.png\"")
                     .body(result);
-        } catch (IllegalArgumentException e) {
-            log.warn("Embed failed: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
-        } catch (IOException e) {
-            log.error("Embed error", e);
+        } catch (Exception e) {
+            log.error("Embed failed: {}", e.getMessage());
             return ResponseEntity.status(500).build();
         }
     }
 
-    /**
-     * POST /api/watermark/extract
-     * Trích xuất watermark ẩn từ ảnh.
-     */
     @PostMapping("/extract")
-    public ResponseEntity<Map<String, Object>> extract(
-            @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<?> extract(@RequestParam("file") MultipartFile file) {
         try {
-            WatermarkResult result = service.extractWatermark(file.getBytes());
-            if (!result.isFound()) {
-                return ResponseEntity.ok(Map.of(
-                        "found", false,
-                        "message", "No watermark found in this image."));
-            }
+            WatermarkResult result = engine.extractAuto(file.getBytes(), file.getOriginalFilename());
             return ResponseEntity.ok(Map.of(
-                    "found", true,
-                    "watermark", result.getText()));
-        } catch (IOException e) {
-            log.error("Extract error", e);
-            return ResponseEntity.status(500)
-                    .body(Map.of("error", e.getMessage()));
+                    "found", result.isFound(),
+                    "watermark", result.isFound() ? result.getText() : ""));
+        } catch (Exception e) {
+            log.error("Extract failed: {}", e.getMessage());
+            return ResponseEntity.ok(Map.of("found", false, "watermark", ""));
         }
     }
 
-    /**
-     * GET /api/watermark/health
-     */
     @GetMapping("/health")
     public Map<String, String> health() {
-        return Map.of("status", "ok", "service", "watermark-api");
+        return Map.of("service", "watermark-api", "status", "ok");
     }
 }

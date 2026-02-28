@@ -28,11 +28,11 @@ import java.util.stream.Collectors;
  * <pre>
  * {@code
  * // 1. Add dependency in pom.xml:
- * //    <dependency>
- * //        <groupId>com.watermark</groupId>
- * //        <artifactId>watermark-sdk</artifactId>
- * //        <version>1.0.0</version>
- * //    </dependency>
+ * // <dependency>
+ * // <groupId>com.watermark</groupId>
+ * // <artifactId>watermark-sdk</artifactId>
+ * // <version>1.0.0</version>
+ * // </dependency>
  *
  * // 2. Create a @Bean:
  * &#64;Bean
@@ -41,7 +41,8 @@ import java.util.stream.Collectors;
  * }
  *
  * // 3. Inject and use:
- * @Autowired WatermarkEngine engine;
+ * @Autowired
+ * WatermarkEngine engine;
  * }
  * </pre>
  */
@@ -96,6 +97,42 @@ public class WatermarkEngine {
     public WatermarkResult extract(byte[] imageBytes) throws IOException {
         String text = LsbSteganography.extract(imageBytes);
         return text != null ? WatermarkResult.found(text) : WatermarkResult.notFound();
+    }
+
+    /**
+     * Auto-detect file type and extract the appropriate watermark.
+     */
+    public WatermarkResult extractAuto(byte[] fileBytes, String fileName) throws IOException {
+        String text = null;
+        if (fileName != null && fileName.toLowerCase().endsWith(".pdf")) {
+            text = PdfWatermark.extract(fileBytes);
+        } else {
+            text = LsbSteganography.extract(fileBytes);
+        }
+        return text != null ? WatermarkResult.found(text) : WatermarkResult.notFound();
+    }
+
+    /**
+     * Embed watermark into a PDF (semi-transparent text overlay).
+     */
+    public byte[] embedPdf(byte[] pdfBytes, String userId, String email) throws IOException {
+        return PdfWatermark.embed(pdfBytes, userId, email);
+    }
+
+    /**
+     * Auto-detect file type and embed the appropriate watermark.
+     *
+     * @param fileBytes file content (PNG/BMP or PDF)
+     * @param fileName  original filename (used for type detection)
+     * @param userId    user identifier
+     * @param email     user email
+     * @return watermarked file bytes
+     */
+    public byte[] embedAuto(byte[] fileBytes, String fileName, String userId, String email) throws IOException {
+        if (fileName != null && fileName.toLowerCase().endsWith(".pdf")) {
+            return embedPdf(fileBytes, userId, email);
+        }
+        return embedUserInfo(fileBytes, userId, email);
     }
 
     private static String escape(String s) {

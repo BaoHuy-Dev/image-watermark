@@ -1,0 +1,59 @@
+server:
+  port: 8080
+  tomcat:
+    max-swallow-size: -1
+    max-http-form-post-size: -1
+
+spring:
+  profiles:
+    active: dev
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+      enabled: true
+
+app:
+  jwt:
+    secret: AuraDigitalMarketplaceSecretKeyForJwtTokenGeneration2026VeryLongAndSecure
+    expiration-ms: 86400000
+  storage:
+    path: storage
+
+---
+# Dev profile (H2 in-memory)
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: jdbc:h2:mem:aura_digital
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+  h2:
+    console:
+      enabled: true
+
+logging:
+  level:
+    com.watermark: DEBUG
+
+---
+# Production profile (PostgreSQL)
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: jdbc:postgresql://localhost:5432/aura_digital
+    username: postgres
+    password: postgres
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: update
