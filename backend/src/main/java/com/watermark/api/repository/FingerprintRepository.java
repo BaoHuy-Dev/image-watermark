@@ -8,4 +8,6 @@ import java.util.UUID;
 
 public interface FingerprintRepository extends JpaRepository<WatermarkFingerprint, UUID> {
     List<WatermarkFingerprint> findAll();
+
+    void deleteByUserIdAndProductId(UUID userId, UUID productId);
 }
