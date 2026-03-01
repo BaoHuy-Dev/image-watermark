@@ -9,6 +9,8 @@ function VerifyPage() {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
 
+    const isFingerprintMethod = result?.method?.startsWith('fingerprint');
+
     const handleFileChange = (e) => {
         const selected = e.target.files[0];
         if (selected) {
@@ -127,7 +129,7 @@ function VerifyPage() {
 
                                 {result.found && (
                                     <div className="space-y-4">
-                                        {result.method === 'fingerprint' && result.confidence && (
+                                        {isFingerprintMethod && result.confidence && (
                                             <div className="bg-green-100 p-3 rounded-lg border border-green-300 flex items-center gap-2">
                                                 <span className="material-symbols-outlined text-green-600">fingerprint</span>
                                                 <p className="text-sm font-bold text-green-800">
@@ -137,7 +139,7 @@ function VerifyPage() {
                                         )}
                                         <div className="bg-white p-4 rounded-lg border border-green-500/20 shadow-sm">
                                             <p className="text-xs text-green-600/70 font-bold uppercase tracking-widest mb-2">
-                                                {result.method === 'fingerprint' ? 'Matched Owner' : 'Hidden Payload'}
+                                                {isFingerprintMethod ? 'Matched Owner' : 'Hidden Payload'}
                                             </p>
 
                                             {result.payload ? (
@@ -174,7 +176,7 @@ function VerifyPage() {
                                             )}
                                         </div>
                                         <p className="text-xs text-green-700 text-center">
-                                            Detected via {result.method === 'fingerprint' ? 'Perceptual Hash Fingerprint Matching' : 'Direct Watermark Extraction'}.
+                                            Detected via {isFingerprintMethod ? 'Perceptual Hash Fingerprint Matching' : 'Direct Watermark Extraction'}.
                                         </p>
                                     </div>
                                 )}
